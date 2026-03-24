@@ -36,6 +36,7 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
     implements Collector<DynamicRecord> {
   @VisibleForTesting
   static final String DYNAMIC_TABLE_UPDATE_STREAM = "dynamic-table-update-stream";
+  @VisibleForTesting static final String DYNAMIC_FORWARD_STREAM = "dynamic-forward-stream";
 
   private final DynamicRecordGenerator<T> generator;
   private final CatalogLoader catalogLoader;
@@ -51,6 +52,7 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
   private transient HashKeyGenerator hashKeyGenerator;
   private transient TableUpdater updater;
   private transient OutputTag<DynamicRecordInternal> updateStream;
+  private transient OutputTag<DynamicRecordInternal> forwardStream;
   private transient Collector<DynamicRecordInternal> collector;
   private transient Context context;
 
@@ -90,9 +92,13 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
     this.hashKeyGenerator =
         new HashKeyGenerator(
             cacheMaximumSize, getRuntimeContext().getTaskInfo().getMaxNumberOfParallelSubtasks());
-    if (immediateUpdate) {
-      updater = new TableUpdater(tableCache, catalog, caseSensitive, dropUnusedColumns);
-    } else {
+    // Always create updater — needed for forced immediate updates on forward records
+    this.updater = new TableUpdater(tableCache, catalog, caseSensitive, dropUnusedColumns);
+    this.forwardStream =
+        new OutputTag<>(
+            DYNAMIC_FORWARD_STREAM,
+            new DynamicRecordInternalType(catalogLoader, true, cacheMaximumSize)) {};
+    if (!immediateUpdate) {
       updateStream =
           new OutputTag<>(
               DYNAMIC_TABLE_UPDATE_STREAM,
@@ -112,6 +118,8 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
 
   @Override
   public void collect(DynamicRecord data) {
+    boolean isForward = data.distributionMode() == null;
+
     boolean exists = tableCache.exists(data.tableIdentifier()).f0;
     String foundBranch = exists ? tableCache.branch(data.tableIdentifier(), data.branch()) : null;
 
@@ -122,20 +130,23 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
 
     PartitionSpec foundSpec = exists ? tableCache.spec(data.tableIdentifier(), data.spec()) : null;
 
-    if (!exists
-        || foundBranch == null
-        || foundSpec == null
-        || foundSchema.compareResult() == CompareSchemasVisitor.Result.SCHEMA_UPDATE_NEEDED) {
-      if (immediateUpdate) {
+    boolean needsUpdate =
+        !exists
+            || foundBranch == null
+            || foundSpec == null
+            || foundSchema.compareResult() == CompareSchemasVisitor.Result.SCHEMA_UPDATE_NEEDED;
+
+    if (needsUpdate) {
+      if (isForward || immediateUpdate) {
         Tuple2<TableMetadataCache.ResolvedSchemaInfo, PartitionSpec> newData =
             updater.update(
                 data.tableIdentifier(), data.branch(), data.schema(), data.spec(), tableCreator);
         emit(
-            collector,
             data,
             newData.f0.resolvedTableSchema(),
             newData.f0.recordConverter(),
-            newData.f1);
+            newData.f1,
+            isForward);
       } else {
         int writerKey =
             hashKeyGenerator.generateKey(
@@ -159,33 +170,37 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
       }
     } else {
       emit(
-          collector,
           data,
           foundSchema.resolvedTableSchema(),
           foundSchema.recordConverter(),
-          foundSpec);
+          foundSpec,
+          isForward);
     }
   }
 
   private void emit(
-      Collector<DynamicRecordInternal> out,
       DynamicRecord data,
       Schema schema,
       DataConverter recordConverter,
-      PartitionSpec spec) {
+      PartitionSpec spec,
+      boolean forward) {
     RowData rowData = (RowData) recordConverter.convert(data.rowData());
-    int writerKey = hashKeyGenerator.generateKey(data, schema, spec, rowData);
-    String tableName = data.tableIdentifier().toString();
-    out.collect(
+    int writerKey = forward ? 0 : hashKeyGenerator.generateKey(data, schema, spec, rowData);
+    DynamicRecordInternal record =
         new DynamicRecordInternal(
-            tableName,
+            data.tableIdentifier().toString(),
             data.branch(),
             schema,
             rowData,
             spec,
             writerKey,
             data.upsertMode(),
-            DynamicSinkUtil.getEqualityFieldIds(data.equalityFields(), schema)));
+            DynamicSinkUtil.getEqualityFieldIds(data.equalityFields(), schema));
+    if (forward) {
+      context.output(forwardStream, record);
+    } else {
+      collector.collect(record);
+    }
   }
 
   @Override

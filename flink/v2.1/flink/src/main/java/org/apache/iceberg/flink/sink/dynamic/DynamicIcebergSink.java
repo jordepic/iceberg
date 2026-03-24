@@ -489,9 +489,6 @@ public class DynamicIcebergSink
               .returns(type);
 
       // Forward writer: chained with generator via forward edge, no data shuffle
-      WriterSink writerSink =
-          new WriterSink(
-              sink.catalogLoader, sink.writeProperties, sink.flinkConfig, sink.cacheMaximumSize);
       TypeInformation<CommittableMessage<DynamicWriteResult>> writeResultTypeInfo =
           CommittableMessageTypeInfo.of(sink::getWriteResultSerializer);
 
@@ -503,7 +500,11 @@ public class DynamicIcebergSink
               .transform(
                   operatorName("Writer-Forward"),
                   writeResultTypeInfo,
-                  new SinkWriterOperatorFactory<>(writerSink))
+                  new DynamicWriterOperator(
+                      sink.catalogLoader,
+                      sink.writeProperties,
+                      sink.flinkConfig,
+                      sink.cacheMaximumSize))
               .uid(prefixIfNotNull(uidPrefix, "-writer-forward"));
 
       // Inject forward write results into sink — they'll be unioned in addPreCommitTopology

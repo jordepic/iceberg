@@ -577,6 +577,66 @@ Rewrite position delete files in table `db.sample`.  This selects position delet
 CALL catalog_name.system.rewrite_position_delete_files(table => 'db.sample', options => map('min-input-files','2'));
 ```
 
+### `convert_equality_deletes`
+
+Equality delete files require an expensive hash-join at read time. This procedure converts them to
+deletion vectors (DVs) — compact Roaring bitmaps in Puffin files — which eliminate the join and
+improve read performance.
+
+Each table partition is processed as an independent Spark job. Within a partition, each distinct
+set of equality field IDs is joined separately against the partition's data files. Files are read
+using Iceberg's format-model readers (field-ID based column matching), supporting Parquet
+(vectorized), ORC (vectorized), and Avro data files.
+
+Requires table format version 3.
+
+#### Usage
+
+| Argument Name | Required? | Type | Description |
+|---------------|-----------|------|-------------|
+| `table`       | ✔️  | string | Name of the table to update |
+| `options`     |    | map<string, string> | Options to control execution |
+| `where`       |    | string | Predicate to filter which partitions to process |
+
+#### Options
+
+| Name | Default Value | Description |
+|------|---------------|-------------|
+| `max-partitions` | all | Maximum number of partitions to process per run (heaviest first by eq-delete count) |
+| `max-concurrent-partitions` | 1 | Maximum number of partitions processed in parallel |
+| `join-strategy` | `auto` | Join hint for the equality join: `auto`, `broadcast`, `hash`, or `sort-merge` |
+
+#### Output
+
+| Output Name | Type | Description |
+|-------------|------|-------------|
+| `converted_equality_delete_files_count` | int | Number of equality delete files removed |
+| `added_dv_count` | int | Number of deletion vectors written |
+
+#### Examples
+
+Convert all equality deletes in table `db.sample`:
+```sql
+CALL catalog_name.system.convert_equality_deletes('db.sample');
+```
+
+Convert equality deletes in a specific partition:
+```sql
+CALL catalog_name.system.convert_equality_deletes(table => 'db.sample', where => 'category = "electronics"');
+```
+
+Convert at most 10 partitions, processing 4 in parallel, using broadcast join:
+```sql
+CALL catalog_name.system.convert_equality_deletes(
+  table => 'db.sample',
+  options => map(
+    'max-partitions', '10',
+    'max-concurrent-partitions', '4',
+    'join-strategy', 'broadcast'
+  )
+);
+```
+
 ## Table migration
 
 The `snapshot` and `migrate` procedures help test and migrate existing Hive or Spark tables to Iceberg.

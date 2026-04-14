@@ -94,4 +94,10 @@ public interface ActionsProvider {
     throw new UnsupportedOperationException(
         this.getClass().getName() + " does not implement removeDanglingDeleteFiles");
   }
+
+  /** Instantiates an action to convert equality delete files to deletion vectors. */
+  default ConvertEqualityDeleteFiles convertEqualityDeletes(Table table) {
+    throw new UnsupportedOperationException(
+        this.getClass().getName() + " does not implement convertEqualityDeletes");
+  }
 }

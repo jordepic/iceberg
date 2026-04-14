@@ -38,10 +38,15 @@ public interface ConvertEqualityDeleteFiles
 
   /** The action result that contains a summary of the execution. */
   interface Result {
-    /** Returns the count of the deletes that been converted. */
+    /** Returns the count of the equality delete files that were converted. */
     int convertedEqualityDeleteFilesCount();
 
     /** Returns the count of the added position delete files. */
     int addedPositionDeleteFilesCount();
+
+    /** Returns the count of the added deletion vectors (Puffin files). */
+    default int addedDeletionVectorCount() {
+      return 0;
+    }
   }
 }

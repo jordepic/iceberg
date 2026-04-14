@@ -119,4 +119,9 @@ public class SparkActions implements ActionsProvider {
   public RewriteTablePathSparkAction rewriteTablePath(Table table) {
     return new RewriteTablePathSparkAction(spark, table);
   }
+
+  @Override
+  public ConvertEqualityDeleteFilesSparkAction convertEqualityDeletes(Table table) {
+    return new ConvertEqualityDeleteFilesSparkAction(spark, table);
+  }
 }

@@ -23,9 +23,7 @@ import static org.apache.spark.sql.functions.col;
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +62,8 @@ import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.OutputFileFactory;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.util.concurrent.MoreExecutors;
 import org.apache.iceberg.relocated.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.iceberg.spark.JobGroupInfo;
@@ -286,11 +286,11 @@ public class ConvertEqualityDeleteFilesSparkAction
       Broadcast<Map<String, DvInfo>> dvMapBroadcast) {
 
     Map<List<Integer>, List<DeleteFile>> eqDeletesByFieldIds =
-        workUnit.eqDeleteFiles.stream()
+        workUnit.eqDeleteFiles().stream()
             .collect(
                 Collectors.groupingBy(
                     df -> {
-                      List<Integer> ids = new ArrayList<>(df.equalityFieldIds());
+                      List<Integer> ids = Lists.newArrayList(df.equalityFieldIds());
                       Collections.sort(ids);
                       return ids;
                     }));
@@ -342,15 +342,15 @@ public class ConvertEqualityDeleteFilesSparkAction
 
     // Read eq-delete files
     Dataset<Row> eqDeletes =
-        createFileListDF(eqDeleteGroup, workUnit.eqSequenceNums)
+        createFileListDF(eqDeleteGroup, workUnit.eqSequenceNums())
             .flatMap(
                 new IcebergFileReader(tableBroadcast, equalitySchema, eqSparkSchema, false),
                 Encoders.row(eqOutputSchema));
 
     // Read data files
-    List<Row> dataFileRows = new ArrayList<>();
-    for (Map.Entry<String, DataFile> entry : workUnit.dataFiles.entrySet()) {
-      Long seq = workUnit.dataSequenceNums.get(entry.getKey());
+    List<Row> dataFileRows = Lists.newArrayList();
+    for (Map.Entry<String, DataFile> entry : workUnit.dataFiles().entrySet()) {
+      Long seq = workUnit.dataSequenceNums().get(entry.getKey());
       if (seq != null) {
         dataFileRows.add(RowFactory.create(entry.getKey(), entry.getValue().format().name(), seq));
       }
@@ -375,7 +375,7 @@ public class ConvertEqualityDeleteFilesSparkAction
   // --- Inventory ---
 
   private List<DeleteFile> filterByExpression(List<DeleteFile> deleteFiles) {
-    Map<Integer, Evaluator> evaluatorsBySpec = new HashMap<>();
+    Map<Integer, Evaluator> evaluatorsBySpec = Maps.newHashMap();
     for (Map.Entry<Integer, PartitionSpec> entry : table.specs().entrySet()) {
       Expression projected = Projections.inclusive(entry.getValue()).project(filter);
       evaluatorsBySpec.put(
@@ -413,7 +413,7 @@ public class ConvertEqualityDeleteFilesSparkAction
   private Map<String, Long> collectSequenceNums(
       Dataset<Row> scopedEntries, List<DeleteFile> files) {
     Set<String> paths = files.stream().map(DeleteFile::location).collect(Collectors.toSet());
-    Map<String, Long> map = new HashMap<>();
+    Map<String, Long> map = Maps.newHashMap();
     scopedEntries
         .filter("data_file.content = 2")
         .selectExpr("data_file.file_path", "sequence_number")
@@ -430,7 +430,7 @@ public class ConvertEqualityDeleteFilesSparkAction
 
   private Map<String, Long> collectSequenceNumsForDataFiles(
       Dataset<Row> scopedEntries, Map<String, DataFile> dataFiles) {
-    Map<String, Long> map = new HashMap<>();
+    Map<String, Long> map = Maps.newHashMap();
     scopedEntries
         .filter("data_file.content = 0")
         .selectExpr("data_file.file_path", "sequence_number")
@@ -476,21 +476,21 @@ public class ConvertEqualityDeleteFilesSparkAction
       Map<String, Long> dataSequenceNums) {
 
     Map<String, List<DeleteFile>> eqByPartition = groupByPartitionKey(eqDeleteFiles);
-    Map<String, Map<String, DataFile>> dataByPartition = new HashMap<>();
+    Map<String, Map<String, DataFile>> dataByPartition = Maps.newHashMap();
     for (Map.Entry<String, DataFile> entry : dataFilesByPath.entrySet()) {
       String key = partitionKey(entry.getValue());
       dataByPartition
-          .computeIfAbsent(key, k -> new HashMap<>())
+          .computeIfAbsent(key, k -> Maps.newHashMap())
           .put(entry.getKey(), entry.getValue());
     }
 
-    Map<String, PartitionWorkUnit> workUnits = new HashMap<>();
+    Map<String, PartitionWorkUnit> workUnits = Maps.newHashMap();
     for (Map.Entry<String, List<DeleteFile>> entry : eqByPartition.entrySet()) {
       String key = entry.getKey();
       Map<String, DataFile> partitionDataFiles =
           dataByPartition.getOrDefault(key, Collections.emptyMap());
 
-      Map<String, DeleteFile> partitionDvs = new HashMap<>();
+      Map<String, DeleteFile> partitionDvs = Maps.newHashMap();
       for (String dataPath : partitionDataFiles.keySet()) {
         DeleteFile dv = existingDvsByDataFile.get(dataPath);
         if (dv != null) {
@@ -512,9 +512,9 @@ public class ConvertEqualityDeleteFilesSparkAction
   }
 
   private <F extends ContentFile<F>> Map<String, List<F>> groupByPartitionKey(List<F> files) {
-    Map<String, List<F>> groups = new HashMap<>();
+    Map<String, List<F>> groups = Maps.newHashMap();
     for (F file : files) {
-      groups.computeIfAbsent(partitionKey(file), k -> new ArrayList<>()).add(file);
+      groups.computeIfAbsent(partitionKey(file), k -> Lists.newArrayList()).add(file);
     }
     return groups;
   }
@@ -556,7 +556,7 @@ public class ConvertEqualityDeleteFilesSparkAction
 
   private List<DeleteFile> buildDvDeleteFiles(
       List<Row> dvResultRows, Map<String, DataFile> dataFilesByPath) {
-    List<DeleteFile> newDvs = new ArrayList<>();
+    List<DeleteFile> newDvs = Lists.newArrayList();
     for (Row row : dvResultRows) {
       String referencedDataFile = row.getString(0);
       DataFile dataFile = dataFilesByPath.get(referencedDataFile);
@@ -618,7 +618,7 @@ public class ConvertEqualityDeleteFilesSparkAction
   }
 
   private Map<String, DvInfo> buildDvInfoMap(Map<String, DeleteFile> existingDvsByDataFile) {
-    Map<String, DvInfo> map = new HashMap<>();
+    Map<String, DvInfo> map = Maps.newHashMap();
     existingDvsByDataFile.forEach(
         (path, dv) ->
             map.put(
@@ -634,7 +634,7 @@ public class ConvertEqualityDeleteFilesSparkAction
 
   private static List<Types.NestedField> appendField(
       List<Types.NestedField> fields, Types.NestedField extra) {
-    List<Types.NestedField> result = new ArrayList<>(fields);
+    List<Types.NestedField> result = Lists.newArrayList(fields);
     result.add(extra);
     return result;
   }
@@ -651,7 +651,7 @@ public class ConvertEqualityDeleteFilesSparkAction
       Dataset<Row> filteredEntries, Types.StructType combinedFileType) {
     Dataset<Row> df = filteredEntries.select("data_file.*");
     StructType sparkType = df.schema();
-    Map<String, DataFile> map = new HashMap<>();
+    Map<String, DataFile> map = Maps.newHashMap();
     df.collectAsList()
         .forEach(
             row -> {
@@ -665,7 +665,7 @@ public class ConvertEqualityDeleteFilesSparkAction
       Dataset<Row> dvEntries, Types.StructType combinedFileType) {
     Dataset<Row> df = dvEntries.select("data_file.*");
     StructType sparkType = df.schema();
-    Map<String, DeleteFile> map = new HashMap<>();
+    Map<String, DeleteFile> map = Maps.newHashMap();
     df.collectAsList()
         .forEach(
             row -> {
@@ -693,11 +693,11 @@ public class ConvertEqualityDeleteFilesSparkAction
   // --- Inner classes ---
 
   static class PartitionWorkUnit {
-    final List<DeleteFile> eqDeleteFiles;
-    final Map<String, DataFile> dataFiles;
-    final Map<String, DeleteFile> existingDvs;
-    final Map<String, Long> eqSequenceNums;
-    final Map<String, Long> dataSequenceNums;
+    private final List<DeleteFile> eqDeleteFiles;
+    private final Map<String, DataFile> dataFiles;
+    private final Map<String, DeleteFile> existingDvs;
+    private final Map<String, Long> eqSequenceNums;
+    private final Map<String, Long> dataSequenceNums;
 
     PartitionWorkUnit(
         List<DeleteFile> eqDeleteFiles,
@@ -711,15 +711,31 @@ public class ConvertEqualityDeleteFilesSparkAction
       this.eqSequenceNums = eqSequenceNums;
       this.dataSequenceNums = dataSequenceNums;
     }
+
+    List<DeleteFile> eqDeleteFiles() {
+      return eqDeleteFiles;
+    }
+
+    Map<String, DataFile> dataFiles() {
+      return dataFiles;
+    }
+
+    Map<String, Long> eqSequenceNums() {
+      return eqSequenceNums;
+    }
+
+    Map<String, Long> dataSequenceNums() {
+      return dataSequenceNums;
+    }
   }
 
   static class DvInfo implements Serializable {
     private static final long serialVersionUID = 1L;
-    final String location;
-    final long contentOffset;
-    final long contentSize;
-    final long recordCount;
-    final String referencedDataFile;
+    private final String location;
+    private final long contentOffset;
+    private final long contentSize;
+    private final long recordCount;
+    private final String referencedDataFile;
 
     DvInfo(
         String location,
@@ -732,6 +748,26 @@ public class ConvertEqualityDeleteFilesSparkAction
       this.contentSize = contentSize;
       this.recordCount = recordCount;
       this.referencedDataFile = referencedDataFile;
+    }
+
+    String location() {
+      return location;
+    }
+
+    long contentOffset() {
+      return contentOffset;
+    }
+
+    long contentSize() {
+      return contentSize;
+    }
+
+    long recordCount() {
+      return recordCount;
+    }
+
+    String referencedDataFile() {
+      return referencedDataFile;
     }
   }
 
@@ -978,7 +1014,7 @@ public class ConvertEqualityDeleteFilesSparkAction
       dvWriter.close();
       DeleteWriteResult writeResult = dvWriter.result();
 
-      List<Row> results = new ArrayList<>();
+      List<Row> results = Lists.newArrayList();
       for (DeleteFile dv : writeResult.deleteFiles()) {
         results.add(
             RowFactory.create(
@@ -997,23 +1033,23 @@ public class ConvertEqualityDeleteFilesSparkAction
         return null;
       }
       try {
-        InputFile inputFile = tbl.io().newInputFile(dvInfo.location);
-        byte[] bytes = new byte[Math.toIntExact(dvInfo.contentSize)];
-        IOUtil.readFully(inputFile, dvInfo.contentOffset, bytes, 0, bytes.length);
+        InputFile inputFile = tbl.io().newInputFile(dvInfo.location());
+        byte[] bytes = new byte[Math.toIntExact(dvInfo.contentSize())];
+        IOUtil.readFully(inputFile, dvInfo.contentOffset(), bytes, 0, bytes.length);
         DeleteFile dvMetadata =
             FileMetadata.deleteFileBuilder(PartitionSpec.unpartitioned())
                 .ofPositionDeletes()
                 .withFormat(FileFormat.PUFFIN)
-                .withPath(dvInfo.location)
+                .withPath(dvInfo.location())
                 .withFileSizeInBytes(0)
-                .withRecordCount(dvInfo.recordCount)
-                .withContentOffset(dvInfo.contentOffset)
-                .withContentSizeInBytes(dvInfo.contentSize)
-                .withReferencedDataFile(dvInfo.referencedDataFile)
+                .withRecordCount(dvInfo.recordCount())
+                .withContentOffset(dvInfo.contentOffset())
+                .withContentSizeInBytes(dvInfo.contentSize())
+                .withReferencedDataFile(dvInfo.referencedDataFile())
                 .build();
         return PositionDeleteIndex.deserialize(bytes, dvMetadata);
       } catch (IOException e) {
-        throw new UncheckedIOException("Failed to read existing DV at " + dvInfo.location, e);
+        throw new UncheckedIOException("Failed to read existing DV at " + dvInfo.location(), e);
       }
     }
   }

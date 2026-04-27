@@ -555,7 +555,7 @@ The `DistributionMode` set on each `DynamicRecord` controls how that record is r
 |--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `NONE` | Records are distributed across writer subtasks in a round-robin fashion (or by equality fields if set).                                                                                      |
 | `HASH` | Records are distributed by partition key (partitioned tables) or equality fields (unpartitioned tables). Ensures that records for the same partition are handled by the same writer subtask. |
-| `null` | Forward mode: bypasses distribution entirely and sends records directly via a forward edge (see below).                                                                                      |
+| `null` | Forward mode: bypasses distribution entirely and sends records directly via a forward edge (see below). Ignored when the record resolves to non-empty equality fields (see warning below).   |
 
 #### Forward Mode
 
@@ -570,6 +570,7 @@ Forward and regular records can be mixed in the same pipeline. The processor rou
 
 1. In the forward path, schema changes are always applied immediately because records must pass straight through via the forward edge. For the intended high-volume use case, this can cause many conflicting commits to the Iceberg catalog and temporarily delay data processing. Consider either updating the schema externally before publishing records with the new schema, or planning for a temporary disruption in throughput when a new schema is introduced from upstream.
 2. Because the forward path skips distribution entirely, users are responsible for distributing the data correctly in the upstream before the records reach the dynamic Iceberg sink. Otherwise, writes could be unbalanced.
+3. Forward mode does not apply to records that resolve to a non-empty equality-field set — either because `EqualityFields` is set or because the schema declares identifier fields. Such records are always hash-distributed by those fields (as in `HASH` mode) so that rows sharing a key reach the same writer subtask; without that guarantee, data and equality deletes can be emitted by multiple writers at once without cancelling each other out, leading to duplicated data.
 
 ### Notes
 

@@ -67,7 +67,10 @@ public class DynamicRecord {
    * @param rowData The data matching the provided schema.
    * @param partitionSpec The target table {@link PartitionSpec}.
    * @param distributionMode The {@link DistributionMode}. {@code null} indicates forward (no
-   *     shuffle) writes.
+   *     shuffle) writes. Ignored when the record resolves to a non-empty equality-field set (either
+   *     {@code equalityFields} is set, or the schema declares identifier fields): such records are
+   *     always hash-distributed by those fields so that rows sharing a key reach the same writer
+   *     subtask, which is required for equality-delete correctness.
    * @param writeParallelism The number of parallel writers. Can be set to any value {@literal > 0},
    *     but will always be automatically capped by the maximum write parallelism, which is the
    *     parallelism of the sink. Set to Integer.MAX_VALUE for always using the maximum available

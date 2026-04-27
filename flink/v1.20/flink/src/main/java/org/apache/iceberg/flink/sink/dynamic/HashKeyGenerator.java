@@ -20,7 +20,6 @@ package org.apache.iceberg.flink.sink.dynamic;
 
 import static org.apache.iceberg.TableProperties.WRITE_DISTRIBUTION_MODE;
 
-import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -79,6 +78,9 @@ class HashKeyGenerator {
       @Nullable PartitionSpec tableSpec,
       @Nullable RowData overrideRowData) {
     String tableIdent = dynamicRecord.tableIdentifier().toString();
+    Schema effectiveSchema = MoreObjects.firstNonNull(tableSchema, dynamicRecord.schema());
+    Set<String> effectiveEqualityFields =
+        DynamicSinkUtil.resolveEqualityFieldNames(dynamicRecord.equalityFields(), effectiveSchema);
     SelectorKey cacheKey =
         new SelectorKey(
             tableIdent,
@@ -87,7 +89,7 @@ class HashKeyGenerator {
             tableSpec != null ? tableSpec.specId() : null,
             dynamicRecord.schema(),
             dynamicRecord.spec(),
-            dynamicRecord.equalityFields(),
+            effectiveEqualityFields,
             MoreObjects.firstNonNull(dynamicRecord.distributionMode(), DistributionMode.NONE),
             Math.min(dynamicRecord.writeParallelism(), maxWriteParallelism));
     KeySelector<RowData, Integer> keySelector =
@@ -96,12 +98,11 @@ class HashKeyGenerator {
             k ->
                 getKeySelector(
                     tableIdent,
-                    MoreObjects.firstNonNull(tableSchema, dynamicRecord.schema()),
+                    effectiveSchema,
                     MoreObjects.firstNonNull(tableSpec, dynamicRecord.spec()),
                     MoreObjects.firstNonNull(
                         dynamicRecord.distributionMode(), DistributionMode.NONE),
-                    MoreObjects.firstNonNull(
-                        dynamicRecord.equalityFields(), Collections.emptySet()),
+                    effectiveEqualityFields,
                     Math.min(dynamicRecord.writeParallelism(), maxWriteParallelism)));
     try {
       return keySelector.getKey(

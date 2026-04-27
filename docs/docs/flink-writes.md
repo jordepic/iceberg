@@ -486,7 +486,7 @@ We need the following information (DynamicRecord) for every record:
 | `DistributionMode` | The distribution mode for writing the record (NONE, HASH or `null`). When `null`, the record won't be shuffled at all. |
 | `Parallelism`      | The maximum number of parallel writers for a given table/branch/schema/spec (WriteTarget). |
 | `UpsertMode`       | Overrides this table's write.upsert.enabled (optional).                                   |
-| `EqualityFields`   | The equality fields for the table(optional).                                                        |
+| `EqualityFields`   | The equality fields for the table (optional). When unset, the dynamic sink falls back to the schema's identifier fields for both distribution (records sharing a key route to the same writer) and equality-delete inference. Identifier fields do not auto-enable upsert mode — that flag remains opt-in. |
 
 ### Schema Evolution
 

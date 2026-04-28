@@ -120,14 +120,7 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
 
   @Override
   public void collect(DynamicRecord data) {
-    // Forward mode is incompatible with equality fields: records sharing the same equality key must
-    // land on the same writer subtask to preserve equality-delete semantics. Fall back to hash
-    // distribution by equality fields whenever the record resolves to a non-empty equality-field
-    // set (user-supplied or inferred from the schema's identifier fields).
-    boolean isForward =
-        data.distributionMode() == null
-            && DynamicSinkUtil.resolveEqualityFieldNames(data.equalityFields(), data.schema())
-                .isEmpty();
+    boolean isForward = isForwardEligible(data);
 
     boolean exists = tableCache.exists(data.tableIdentifier()).f0;
     String foundBranch = exists ? tableCache.branch(data.tableIdentifier(), data.branch()) : null;
@@ -222,5 +215,17 @@ class DynamicRecordProcessor<T> extends ProcessFunction<T, DynamicRecordInternal
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
+  }
+
+  /**
+   * Forward mode is incompatible with equality fields: records sharing the same equality key must
+   * land on the same writer subtask to preserve equality-delete semantics. A record can only take
+   * the forward path when the user requested it (null distribution mode) and the record resolves to
+   * an empty equality-field set (no user-supplied set and no schema identifier fields).
+   */
+  private static boolean isForwardEligible(DynamicRecord data) {
+    return data.distributionMode() == null
+        && DynamicSinkUtil.resolveEqualityFieldNames(data.equalityFields(), data.schema())
+            .isEmpty();
   }
 }
